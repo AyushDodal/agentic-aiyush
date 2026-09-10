@@ -1,3 +1,18 @@
+[project]
+name = "agentic-aiyush-backend"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.116,<1",
+    "uvicorn[standard]>=0.35,<1",
+    "openai>=2,<3",
+    "qdrant-client>=1.15,<2",
+    "python-multipart>=0.0.20,<1",
+    "pydantic-settings>=2.10,<3",
+    "slowapi>=0.1.9,<0.2",
+    "redis>=5,<7",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
