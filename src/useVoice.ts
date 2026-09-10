@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_BASE, apiFetch } from './api';
 
+const MAX_AUDIO_BYTES = 4_000_000;
+
 type Recognition = {
   lang: string;
   interimResults: boolean;
@@ -191,14 +193,24 @@ export function useVoice(onTranscript: (text: string) => void, onError: (message
       const recording = new MediaRecorder(media, mimeType ? { mimeType } : undefined);
       recorder.current = recording;
       const chunks: Blob[] = [];
-      recording.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      let recordedBytes = 0;
+      recording.ondataavailable = (event) => {
+        if (event.data.size) { chunks.push(event.data); recordedBytes += event.data.size; }
+        if (recordedBytes > MAX_AUDIO_BYTES) stopRecording();
+      };
       recording.onstop = async () => {
         media.getTracks().forEach((track) => track.stop());
         if (current !== recordingEpoch.current) return;
+        clearTimeout(timer.current);
         setListening(false);
+        const blob = new Blob(chunks, { type: recording.mimeType || mimeType });
+        if (blob.size > MAX_AUDIO_BYTES) {
+          callbacks.current.onError('The recording is too large. Please ask a shorter question.');
+          return;
+        }
         setTranscribing(true);
         const data = new FormData();
-        data.append('audio', new Blob(chunks, { type: recording.mimeType || mimeType }), 'question');
+        data.append('audio', blob, 'question');
         try {
           transcriptionAbort.current = new AbortController();
           const result = await apiFetch<{ text: string }>('/api/transcribe', { method: 'POST', body: data, signal: transcriptionAbort.current.signal });
@@ -210,7 +222,7 @@ export function useVoice(onTranscript: (text: string) => void, onError: (message
           if (current === recordingEpoch.current) callbacks.current.onError(error instanceof Error ? error.message : 'Transcription failed.');
         } finally { if (current === recordingEpoch.current) setTranscribing(false); }
       };
-      recording.start();
+      recording.start(1000);
       setListening(true);
       timer.current = setTimeout(() => stopRecording(), 45000);
     } catch {

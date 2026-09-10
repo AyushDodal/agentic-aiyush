@@ -36,7 +36,8 @@ Voice transcription and synthesis calls pass through FastAPI; credentials never 
 | API | FastAPI / Python 3.12 | Typed input validation and practical AI library support |
 | Parsing | pypdf layout mode | Keeps this resume's multi-column header and job sections readable |
 | Chunking | LangChain recursive splitter, 950 characters / 180 overlap | Compact contexts with passage overlap |
-| Vectors | Qdrant, cosine similarity | Embedded persistent development database; optional hosted connection |
+| Hosting | Two Vercel projects | Vite frontend and Python FastAPI Function from the same repository |
+| Vectors | Qdrant, cosine similarity | Embedded development database; Qdrant Cloud for production |
 | Embeddings | text-embedding-3-small, 1024 dimensions | Configurable semantic retrieval |
 | Answers | gpt-4.1-mini, Responses structured output | Answers, supporting source IDs, and support flag in one contract |
 | Voice | gpt-4o-mini-transcribe and gpt-4o-mini-tts / ash | Recorded question and synthesized reply |
@@ -52,6 +53,8 @@ Citation validation cannot prove that every sentence is supported. Prompt inject
 
 ## Operational Boundaries
 
-Ingestion is a CLI operation. A new generation is embedded and persisted before its manifest replaces the active generation. Embedded Qdrant permits one API process; stop it before a separate ingestion command. Keep the manifest and PDF on persistent storage even if using hosted Qdrant. Multiple replicas need a shared manifest and distributed rate limiter.
+Ingestion is an operator CLI operation. A new generation is embedded and persisted before its manifest replaces the active generation. In cloud mode the manifest is a payload-only point in a separate Qdrant metadata collection; it contains no local machine paths. Readers refresh it and query only the published generation. Previous cloud generations are retained for in-flight readers; retire them during a quiet maintenance window. Use one ingestion writer at a time.
+
+Embedded Qdrant retains the local JSON manifest for development and permits one API process; stop it before a separate ingestion command. Vercel mode requires cloud storage, performs no startup ingestion, and needs no persistent filesystem. The public PDF is bundled at `backend/resume/resume.pdf`, independent of the ingestion machine. Parsing and local-search libraries are excluded from production requirements. Configure Vercel Firewall rate limiting or a shared Redis limiter before public release; the default application limiter remains per instance.
 
 Conversations remain in browser memory. Relevant text and audio are sent to configured AI providers. The public resume endpoint exposes the original connected resume by design. See [[Setup and Deployment]] before release.

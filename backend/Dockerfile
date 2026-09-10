@@ -1,9 +1,14 @@
+# Optional local/container deployment. Vercel uses vercel.json and the Python runtime.
 FROM python:3.12-slim
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-local.txt ./
+RUN pip install --no-cache-dir -r requirements-local.txt
 COPY app ./app
-RUN useradd --create-home avatar && mkdir -p /app/data && chown -R avatar:avatar /app
+COPY resume ./resume
+RUN useradd --create-home --shell /bin/bash avatar \
+    && mkdir -p /app/data /home/avatar/.ssh \
+    && chmod 0700 /home/avatar/.ssh \
+    && chown -R avatar:avatar /app /home/avatar/.ssh
 USER avatar
 ENV DATA_DIR=/app/data
 EXPOSE 8000

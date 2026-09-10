@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from openai import APIConnectionError
 import httpx
 
-from app.config import Settings
+from app.config import MAX_AUDIO_BYTES, Settings
 from app.knowledge import KnowledgeBase
 from app.main import create_app
 from app.models import ChatRequest, GroundedAnswer, Source
@@ -182,7 +182,7 @@ def test_voice_endpoints_and_upload_limits(settings):
         assert client.post("/api/transcribe", files={"audio": ("x.webm", b"audio", "audio/webm;codecs=opus")}).json()["text"] == "What is your experience?"
         assert client.post("/api/transcribe", files={"audio": ("x.exe", b"code", "application/octet-stream")}).status_code == 415
         assert client.post("/api/transcribe", files={"audio": ("x.webm", b"", "audio/webm")}).status_code == 413
-        assert client.post("/api/transcribe", files={"audio": ("x.webm", b"x" * (8 * 1024 * 1024 + 1), "audio/webm")}).status_code == 413
+        assert client.post("/api/transcribe", files={"audio": ("x.webm", b"x" * (MAX_AUDIO_BYTES + 1), "audio/webm")}).status_code == 413
 
 
 def test_local_settings_are_independent_of_working_directory(settings, monkeypatch, tmp_path):

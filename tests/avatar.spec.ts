@@ -97,3 +97,29 @@ test('microphone denial leaves text input usable', async ({ page }) => {
   await expect(page.getByRole('alert')).toContainText('Microphone access was denied');
   await expect(page.getByRole('textbox', { name: 'Your question' })).toBeEnabled();
 });
+
+test('oversized recordings are rejected without an upload', async ({ page }) => {
+  let uploads = 0;
+  await page.route('**/api/transcribe', (route) => { uploads++; return route.fulfill({ json: { text: 'Must not be sent' } }); });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { value: async () => ({ getTracks: () => [{ stop() {} }] }) });
+    class FakeRecorder {
+      static isTypeSupported() { return true; }
+      state = 'inactive';
+      mimeType = 'audio/webm';
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      start() {
+        this.state = 'recording';
+        setTimeout(() => this.ondataavailable?.({ data: new Blob([new Uint8Array(4_000_001)], { type: 'audio/webm' }) }), 10);
+      }
+      stop() { this.state = 'inactive'; setTimeout(() => this.onstop?.(), 0); }
+    }
+    Object.defineProperty(window, 'MediaRecorder', { value: FakeRecorder });
+  });
+  await setup(page);
+  await page.getByRole('button', { name: 'Start voice question' }).click();
+  await expect(page.getByRole('alert')).toContainText('The recording is too large');
+  await expect(page.getByRole('textbox', { name: 'Your question' })).toBeEnabled();
+  expect(uploads).toBe(0);
+});

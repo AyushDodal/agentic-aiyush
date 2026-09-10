@@ -5,20 +5,20 @@ import threading
 import uuid
 from pathlib import Path
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import OpenAI
-from pypdf import PdfReader
 from qdrant_client import QdrantClient, models
-from sklearn.feature_extraction.text import HashingVectorizer
 
 from .config import Settings
 from .models import Source
+
+MANIFEST_ID = "00000000-0000-0000-0000-000000000001"
 
 
 class KnowledgeBase:
     def __init__(self, settings: Settings):
         self.settings = settings
-        settings.storage_path.mkdir(parents=True, exist_ok=True)
+        if not settings.qdrant_url:
+            settings.storage_path.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self.client = (
             QdrantClient(
@@ -34,17 +34,46 @@ class KnowledgeBase:
             if settings.use_openai
             else None
         )
-        self.vectorizer = HashingVectorizer(
-            n_features=1024, alternate_sign=False, stop_words="english", norm="l2"
-        )
+        self.vectorizer = None
+        if not self.openai:
+            from sklearn.feature_extraction.text import HashingVectorizer
+
+            self.vectorizer = HashingVectorizer(
+                n_features=1024, alternate_sign=False, stop_words="english", norm="l2"
+            )
         signature = settings.embedding_model if self.openai else "hashing-1024-v1"
         self.collection = "resume_" + hashlib.sha256(signature.encode()).hexdigest()[:12]
+        self.metadata_collection = self.collection + "_metadata"
         self.manifest_path = settings.storage_path / (self.collection + ".json")
-        self.manifest = (
+        self._local_manifest = (
             json.loads(self.manifest_path.read_text(encoding="utf-8"))
-            if self.manifest_path.exists()
+            if not settings.qdrant_url and self.manifest_path.exists()
             else None
         )
+
+    @property
+    def manifest(self) -> dict | None:
+        if not self.settings.qdrant_url:
+            return self._local_manifest
+        if not self.client.collection_exists(self.metadata_collection):
+            return None
+        records = self.client.retrieve(
+            self.metadata_collection, ids=[MANIFEST_ID], with_payload=True, with_vectors=False
+        )
+        return records[0].payload if records else None
+
+    def publish_manifest(self, manifest: dict):
+        if self.settings.qdrant_url:
+            if not self.client.collection_exists(self.metadata_collection):
+                self.client.create_collection(self.metadata_collection, vectors_config={})
+            self.client.upsert(self.metadata_collection, points=[
+                models.PointStruct(id=MANIFEST_ID, vector={}, payload=manifest)
+            ], wait=True)
+        else:
+            temporary = self.manifest_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            temporary.replace(self.manifest_path)
+            self._local_manifest = manifest
 
     def close(self):
         self.client.close()
@@ -65,14 +94,30 @@ class KnowledgeBase:
 
     @property
     def ready(self) -> bool:
+        return self.active_manifest() is not None
+
+    def active_manifest(self) -> dict | None:
         with self.lock:
-            return bool(
-                self.manifest
-                and self.client.collection_exists(self.collection)
-                and self.client.count(self.collection, exact=True).count
-            )
+            manifest = self.manifest
+            if not manifest or not self.client.collection_exists(self.collection):
+                return None
+            count = self.client.count(
+                self.collection, exact=True, count_filter=self.generation_filter(manifest["generation"])
+            ).count
+            return manifest if count == manifest["chunks"] and count > 0 else None
+
+    @staticmethod
+    def generation_filter(generation: str) -> models.Filter:
+        return models.Filter(must=[models.FieldCondition(
+            key="generation", match=models.MatchValue(value=generation)
+        )])
 
     def ingest(self, paths: list[Path]) -> dict:
+        if self.settings.vercel:
+            raise ValueError("Ingestion must run outside Vercel, using the operator CLI.")
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        from pypdf import PdfReader
+
         splitter = RecursiveCharacterTextSplitter(chunk_size=950, chunk_overlap=180)
         chunks = []
         digest = hashlib.sha256(b"resume-layout-v1")
@@ -97,8 +142,9 @@ class KnowledgeBase:
         if len(chunks) > 500:
             raise ValueError("Resume corpus exceeds 500 chunks. Supply a smaller set of documents.")
         checksum = digest.hexdigest()
-        if self.ready and self.manifest["checksum"] == checksum:
-            return self.manifest
+        active = self.active_manifest()
+        if active and active["checksum"] == checksum:
+            return active
 
         # Build a new generation first; publish it only after every vector is stored.
         vectors = self.embed([chunk["text"] for chunk in chunks])
@@ -113,35 +159,40 @@ class KnowledgeBase:
                     self.collection,
                     vectors_config=models.VectorParams(size=1024, distance=models.Distance.COSINE),
                 )
+            if self.settings.qdrant_url:
+                self.client.create_payload_index(
+                    self.collection, field_name="generation",
+                    field_schema=models.PayloadSchemaType.KEYWORD, wait=True,
+                )
             self.client.upsert(self.collection, points=points, wait=True)
             manifest = {
                 "checksum": checksum, "generation": generation, "chunks": len(chunks),
                 "documents": [path.name for path in paths],
-                "files": [str(path.resolve()) for path in paths],
             }
-            temporary = self.manifest_path.with_suffix(".tmp")
-            temporary.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-            temporary.replace(self.manifest_path)
-            self.manifest = manifest
-            self.client.delete(
-                self.collection,
-                points_selector=models.FilterSelector(filter=models.Filter(must_not=[
-                    models.FieldCondition(key="generation", match=models.MatchValue(value=generation))
-                ])), wait=True,
-            )
+            if not self.settings.qdrant_url:
+                manifest["files"] = [str(path.resolve()) for path in paths]
+            self.publish_manifest(manifest)
+            # Cloud readers may still be using the previous generation. Retain it
+            # until the operator can retire it with no in-flight requests.
+            if not self.settings.qdrant_url:
+                self.client.delete(
+                    self.collection,
+                    points_selector=models.FilterSelector(filter=models.Filter(must_not=[
+                        models.FieldCondition(key="generation", match=models.MatchValue(value=generation))
+                    ])), wait=True,
+                )
         return manifest
 
     def search(self, question: str, limit: int = 5) -> list[Source]:
-        if not self.ready:
+        manifest = self.active_manifest()
+        if not manifest:
             return []
         vector = self.embed([question])[0]
         with self.lock:
             matches = self.client.query_points(
                 self.collection, query=vector, limit=limit, with_payload=True,
                 score_threshold=0.23 if self.openai else 0.12,
-                query_filter=models.Filter(must=[models.FieldCondition(
-                    key="generation", match=models.MatchValue(value=self.manifest["generation"])
-                )]),
+                query_filter=self.generation_filter(manifest["generation"]),
             ).points
         return [Source(id=str(point.id), **{
             key: point.payload[key] for key in ("document", "page", "text")

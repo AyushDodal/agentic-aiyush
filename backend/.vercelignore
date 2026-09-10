@@ -1,0 +1,11 @@
+.env*
+data/
+tests/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+Dockerfile
+.dockerignore
+requirements-dev.txt
+requirements-local.txt

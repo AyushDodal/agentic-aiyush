@@ -33,7 +33,7 @@ $apiProcess = Start-Process -FilePath $pythonPath -ArgumentList @('-m', 'uvicorn
 $previousProxy = $env:API_PROXY_TARGET
 try {
     $env:API_PROXY_TARGET = "http://127.0.0.1:$ApiPort"
-    $webProcess = Start-Process -FilePath $nodePath -ArgumentList @('"' + $vitePath + '"', '--host', '127.0.0.1', '--port', $WebPort, '--strictPort') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $localDirectory 'web.log') -RedirectStandardError (Join-Path $localDirectory 'web-error.log')
+    $webProcess = Start-Process -FilePath $nodePath -ArgumentList @('node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', $WebPort, '--strictPort') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $localDirectory 'web.log') -RedirectStandardError (Join-Path $localDirectory 'web-error.log')
 } finally {
     $env:API_PROXY_TARGET = $previousProxy
 }

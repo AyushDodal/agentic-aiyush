@@ -1,10 +1,11 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+MAX_AUDIO_BYTES = 4_000_000
 
 
 class Settings(BaseSettings):
@@ -21,11 +22,25 @@ class Settings(BaseSettings):
     ai_mode: Literal["auto", "openai", "local"] = "auto"
     data_dir: Path = BACKEND_DIR / "data"
     resume_path: str = ""
+    resume_download_path: str = "resume/resume.pdf"
+    vercel: bool = False
     qdrant_url: str = ""
     qdrant_api_key: SecretStr = SecretStr("")
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     chat_rate_limit: str = "12/minute"
     audio_rate_limit: str = "6/minute"
+    rate_limit_storage_uri: SecretStr = SecretStr("memory://")
+
+    @model_validator(mode="after")
+    def validate_deployment(self):
+        if self.vercel:
+            if not self.qdrant_url:
+                raise ValueError("Vercel requires QDRANT_URL; embedded Qdrant is only supported locally.")
+            if not self.use_openai or not self.openai_api_key.get_secret_value():
+                raise ValueError("Vercel requires OpenAI mode and OPENAI_API_KEY.")
+            if self.resume_path:
+                raise ValueError("Unset RESUME_PATH on Vercel. Ingest through the operator CLI before deployment.")
+        return self
 
     @property
     def use_openai(self) -> bool:

@@ -20,7 +20,7 @@ Recruiters need an efficient way to understand Ayush's professional background a
 - First-person answers from a Python RAG pipeline, with inspectable resume excerpts.
 - Voice output, audio-responsive mouth/eyebrows, blinking, and head motion.
 - Explicit uncertainty when information is not present in the resume.
-- Vercel frontend configuration and containerized Python backend.
+- Separate Vercel frontend and FastAPI backend projects, with Qdrant Cloud storage. Docker remains an optional local/container alternative.
 
 ## Implementation Checklist
 
@@ -33,6 +33,9 @@ Recruiters need an efficient way to understand Ayush's professional background a
 - [x] Add local extractive fallback and absent-resume states.
 - [x] Add automated backend and desktop/mobile browser checks.
 - [x] Prepare frontend/backend deployment configuration.
+- [x] Move cloud index metadata into Qdrant and support read-only serverless startup.
+- [x] Bundle the recruiter-facing resume and enforce Vercel-compatible audio limits.
+- [ ] Configure the production Qdrant account, ingest the resume, and apply deployment-wide rate limits.
 - [ ] Complete public hosting with owner account access.
 - [ ] Conduct a real recruiter interview and review answer quality.
 
@@ -42,4 +45,4 @@ Experience, education, and technology questions must refer to the supplied resum
 
 ## Source Of Truth
 
-The owner supplied `Ayush Dodal Resume (AI Engineer).pdf`. A local working copy lives in ignored `backend/data/resume.pdf`; it is not committed to Git. The original file remains unchanged. The current resume includes no hobbies section, so the avatar must not invent one.
+The owner supplied `Ayush Dodal Resume (AI Engineer).pdf`. A local working copy lives in ignored `backend/data/resume.pdf`. The supplied recruiter-facing version is also bundled at `backend/resume/resume.pdf` for deployment and public download; committing it to a public repository publishes that copy. The original desktop file remains unchanged. The current resume includes no hobbies section, so the avatar must not invent one.
